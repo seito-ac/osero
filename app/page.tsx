@@ -1,15 +1,15 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
-
+import { Dialog, DialogBackdrop, DialogPanel, DialogTitle } from '@headlessui/react'
+import { FaCrown } from "react-icons/fa";
 type Cell = "B" | "W" | null;
 type Player = "B" | "W";
 
 type MoveRecord = {
-  move: number;
-  player: "黒" | "白";
-  position: string;
-  flipped: number;
+  game: number;
+  winner: "黒" | "白" | "引き分け";
+  duration: string;
 };
 
 const BOARD_SIZE = 8;
@@ -84,6 +84,23 @@ function getValidMoves(board: Cell[][], player: Player) {
   return moves;
 }
 
+function formatDuration(milliseconds: number) {
+  const totalSeconds = Math.floor(milliseconds / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor(totalSeconds / 60) % 60;
+  const seconds = totalSeconds % 60;
+
+  if (hours > 0) {
+    return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+  }
+
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
+function getElapsedDuration(startTime: number) {
+  return formatDuration(Date.now() - startTime);
+}
+
 function applyMove(board: Cell[][], row: number, col: number, player: Player) {
   const flips = getFlips(board, row, col, player);
   if (flips.length === 0) return null;
@@ -98,15 +115,12 @@ function applyMove(board: Cell[][], row: number, col: number, player: Player) {
   return { nextBoard, flippedCount: flips.length };
 }
 
-function toPosition(row: number, col: number) {
-  const letters = "ABCDEFGH";
-  return `${letters[col]}${row + 1}`;
-}
-
 export default function Page() {
+  const [open, setOpen] = useState(false)
   const [board, setBoard] = useState<Cell[][]>(createInitialBoard);
   const [currentPlayer, setCurrentPlayer] = useState<Player>("B");
   const [history, setHistory] = useState<MoveRecord[]>([]);
+  const [startTime, setStartTime] = useState<number>(() => Date.now());
   const [message, setMessage] = useState("黒の番です");
   const [passCount, setPassCount] = useState(0);
 
@@ -132,6 +146,7 @@ export default function Page() {
 
   const winnerText = useMemo(() => {
     if (!gameFinished) return null;
+    setOpen(true);
     if (blackCount > whiteCount)
       return {
         text: `ゲーム終了：黒の勝ち (${blackCount - whiteCount}差)`,
@@ -148,26 +163,13 @@ export default function Page() {
     };
   }, [blackCount, whiteCount, gameFinished]);
 
-  const addHistory = (
-    row: number,
-    col: number,
-    flippedCount: number,
-    result?: "黒勝ち" | "白勝ち" | "引き分け",
-  ) => {
-    const now = new Date();
-    const hours = String(now.getHours()).padStart(2, "0");
-    const minutes = String(now.getMinutes()).padStart(2, "0");
-    const seconds = String(now.getSeconds()).padStart(2, "0");
-
+  const addHistory = (winner: "黒" | "白" | "引き分け", duration: string) => {
     setHistory((prev) => [
       ...prev,
       {
-        move: prev.length + 1,
-        player: currentPlayer === "B" ? "黒" : "白",
-        position: toPosition(row, col),
-        flipped: flippedCount,
-        time: `${hours}:${minutes}:${seconds}`,
-        result,
+        game: prev.length + 1,
+        winner,
+        duration,
       },
     ]);
   };
@@ -195,15 +197,13 @@ export default function Page() {
       getValidMoves(result.nextBoard, "W").length === 0;
 
     if (noMoves) {
-      let resultText: "黒勝ち" | "白勝ち" | "引き分け";
+      let resultText: "黒" | "白" | "引き分け";
 
-      if (black > white) resultText = "黒勝ち";
-      else if (white > black) resultText = "白勝ち";
+      if (black > white) resultText = "黒";
+      else if (white > black) resultText = "白";
       else resultText = "引き分け";
 
-      addHistory(row, col, result.flippedCount, resultText);
-    } else {
-      addHistory(row, col, result.flippedCount);
+      addHistory(resultText, getElapsedDuration(startTime));
     }
 
     if (nextPlayerMoves.length > 0) {
@@ -236,6 +236,15 @@ export default function Page() {
     const nextPlayerMoves = getValidMoves(board, nextPlayer);
 
     if (nextPlayerMoves.length === 0) {
+      const black = board.flat().filter((c) => c === "B").length;
+      const white = board.flat().filter((c) => c === "W").length;
+      let resultText: "黒" | "白" | "引き分け";
+
+      if (black > white) resultText = "黒";
+      else if (white > black) resultText = "白";
+      else resultText = "引き分け";
+
+      addHistory(resultText, getElapsedDuration(startTime));
       setPassCount(2);
       setMessage("両者とも置けないためゲーム終了です");
       return;
@@ -251,7 +260,7 @@ export default function Page() {
   const handleReset = () => {
     setBoard(createInitialBoard());
     setCurrentPlayer("B");
-    setHistory([]);
+    setStartTime(Date.now());
     setMessage("黒の番です");
     setPassCount(0);
   };
@@ -272,7 +281,7 @@ export default function Page() {
             <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
               <div>
                 <p className="text-lg font-semibold text-slate-800">
-                  {gameFinished ? winnerText : message}
+                  {gameFinished ? winnerText?.text : message}
                 </p>
                 <p className="mt-1 text-sm text-slate-500">
                   同じ端末で交互にプレイできます
@@ -374,40 +383,40 @@ export default function Page() {
 
           <aside className="rounded-2xl bg-white p-4 shadow-lg md:p-6">
             <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-xl font-bold text-slate-800">対戦履歴</h2>
+              <h2 className="text-xl font-bold text-slate-800">プレイ履歴</h2>
               <span className="rounded-full bg-slate-100 px-3 py-1 text-sm font-semibold text-slate-600">
-                {history.length} 手
+                {history.length} 数
               </span>
             </div>
 
             <div className="mb-4 rounded-2xl bg-slate-50 p-4 text-sm text-slate-600">
-              <p>1列目: 手数</p>
-              <p>2列目: プレイヤー</p>
-              <p>3列目: 置いた場所 / 反転数</p>
+              <p>1列目: プレイ回数</p>
+              <p>2列目: 勝利したユーザー</p>
+              <p>3列目: プレイ時間</p>
             </div>
 
             <div className="max-h-[640px] space-y-2 overflow-y-auto pr-1">
               {history.length === 0 ? (
                 <div className="rounded-2xl border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500">
-                  まだ手は記録されていません
+                  まだプレイが記録されていません
                 </div>
               ) : (
                 history.map((item) => (
                   <div
-                    key={item.move}
+                    key={item.game}
                     className="grid grid-cols-[56px_56px_1fr] items-center gap-3 rounded-2xl border border-slate-200 p-3"
                   >
                     <div className="text-sm font-bold text-slate-700">
-                      #{item.move}
+                      #{item.game}
                     </div>
                     <div
                       className={`inline-flex w-fit rounded-full py-5 text-xs font-bold`}
                     >
-                      勝者: {item.player}
+                      勝者: {item.winner}
                     </div>
                     <div className="text-sm text-slate-700">
                       <span className="ml-2 text-slate-500">
-                        時間: {item.time}
+                        時間: {item.duration}
                       </span>
                     </div>
                   </div>
@@ -417,12 +426,57 @@ export default function Page() {
 
             {(gameFinished || passCount >= 2) && (
               <div className="mt-4 rounded-2xl bg-emerald-50 p-4 text-sm font-semibold text-emerald-800">
-                {winnerText || "ゲーム終了"}
+                {winnerText?.text || "ゲーム終了"}
               </div>
             )}
           </aside>
         </div>
       </div>
+      <div>
+      <Dialog open={open} onClose={setOpen} className="relative z-10">
+        <DialogBackdrop
+          transition
+          className="fixed inset-0 bg-gray-500/75 transition-opacity data-closed:opacity-0 data-enter:duration-300 data-enter:ease-out data-leave:duration-200 data-leave:ease-in"
+        />
+
+        <div className="fixed inset-0 z-10 w-screen overflow-y-auto">
+          <div className="flex min-h-full items-end justify-center p-4 text-center sm:items-center sm:p-0">
+            <DialogPanel
+              transition
+              className="relative transform overflow-hidden rounded-lg bg-white text-left shadow-xl transition-all data-closed:translate-y-4 data-closed:opacity-0 data-enter:duration-300 data-enter:ease-out data-leave:duration-200 data-leave:ease-in sm:my-8 sm:w-full sm:max-w-lg data-closed:sm:translate-y-0 data-closed:sm:scale-95"
+            >
+              <div className="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
+                <div className="sm:flex sm:items-start">
+                  <div className="mx-auto flex size-12 shrink-0 items-center justify-center rounded-full bg-yellow-100 sm:mx-0 sm:size-10">
+                    <FaCrown aria-hidden="true" className="size-6 text-yellow-600" />
+                  </div>
+                  <div className="mt-3 text-center sm:mt-0 sm:ml-4 sm:text-left">
+                    <DialogTitle as="h3" className="text-base font-semibold text-gray-900">
+                      {`${currentPlayer === "B" ? "黒" : "白"}の勝ち！`}
+                    </DialogTitle>
+                    <div className="mt-2">
+                      <p className="text-sm text-gray-500">
+                        ゲームが終了しました。リセットして新しいゲームを始めましょう。
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div className="bg-gray-50 px-4 py-3 sm:flex sm:flex-row-reverse sm:px-6">
+                <button
+                  type="button"
+                  data-autofocus
+                  onClick={() => setOpen(false)}
+                  className="mt-3 inline-flex w-full justify-center rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-xs inset-ring inset-ring-gray-300 hover:bg-gray-50 sm:mt-0 sm:w-auto"
+                >
+                  閉じる
+                </button>
+              </div>
+            </DialogPanel>
+          </div>
+        </div>
+      </Dialog>
+    </div>
     </main>
   );
 }
